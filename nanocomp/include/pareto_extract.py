@@ -139,7 +139,7 @@ def display_best_solutions(df: pd.DataFrame,
         print(f"\nMelhor {label}:")
         print(f"   Valor: {best_row[col]:.6f}")
         print(f"   Parâmetros: ", end="")
-        params = [f"{p}={best_row[p]:.2f}" for p in param_cols if p in df.columns]
+        params = [f"{p}={best_row[p]}" for p in param_cols if p in df.columns]
         print(", ".join(params))
         
         print(f"   Outros objetivos:")
@@ -484,7 +484,7 @@ def print_parameter_analysis(analysis: dict) -> None:
     print("="*80)
     
     for obj_key, obj_data in analysis.items():
-        print(f"\n🎯 Para maximizar {obj_data['objective']}:")
+        print(f"\nGOAL Para maximizar {obj_data['objective']}:")
         
         recommendations = []
         for param, stats in obj_data['parameters'].items():
