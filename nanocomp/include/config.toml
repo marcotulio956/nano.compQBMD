@@ -26,20 +26,21 @@ num_generations = 25
 crossover_prob = 0.9
 mutation_prob = 0.1
 save_frequency = 1  # Save intermediate results every X simulations (0 to disable)
+monolayer_thickness = 0.293
 
 # Limites das variáveis (ajuste conforme seu problema)
 [optimization.bounds]
 arg1_min = 1
 arg1_max = 10
 arg2_min = 1.0
-arg2_max = 5.0
-arg3_min = 5.0
+arg2_max = 10.0
+arg3_min = 1.0
 arg3_max = 10.0
 arg4_min = 1.0
-arg4_max = 5.0
+arg4_max = 10.0
 arg5_min = 1
 arg5_max = 10
 arg6_min = 1.0
-arg6_max = 5.0
-arg7_min = 3.0
+arg6_max = 10.0
+arg7_min = 1.0
 arg7_max = 10.0

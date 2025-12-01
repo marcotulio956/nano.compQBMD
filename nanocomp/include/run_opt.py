@@ -35,7 +35,7 @@ class InitialPopulationSampling(Sampling):
     If the CSV has fewer individuals than pop_size, fills remaining with random sampling.
     """
     
-    def __init__(self, initial_pop, bounds):
+    def __init__(self, initial_pop, bounds, step_nm: float = 0.1):
         """
         Parameters
         ----------
@@ -47,6 +47,7 @@ class InitialPopulationSampling(Sampling):
         super().__init__()
         self.initial_pop = initial_pop
         self.bounds = bounds
+        self.step_nm = step_nm
     
     def _do(self, problem, n_samples, **kwargs):
         n_initial = len(self.initial_pop)
@@ -68,7 +69,11 @@ class InitialPopulationSampling(Sampling):
             
             for i in range(n_initial, n_samples):
                 X[i] = xl + np.random.random(n_vars) * (xu - xl)
-        
+
+        # Quantize / sanitize the returned population
+        for i in range(len(X)):
+            X[i] = _quantize_individual(X[i], step_nm=self.step_nm)
+
         return X
 
 
@@ -108,6 +113,46 @@ def load_initial_population(csv_path, param_cols=None):
     print(f"!WARMED UP! Loaded {len(pop)} individuals from {csv_path.name}")
     
     return pop
+
+
+def _quantize_individual(individual, step_nm: float = 0.1):
+    """Return a quantized copy of an individual.
+
+    - Ensure ARG1 (index 0) and ARG5 (index 4) are integers (rounded).
+    - Quantize thickness-like floats (indices 1,2,3,5,6) to multiples of `step_nm`.
+    """
+    ind = np.array(individual, dtype=float).copy()
+
+    # Enforce integer variables
+    ind[0] = int(round(ind[0]))
+    ind[4] = int(round(ind[4]))
+
+    if step_nm is None or step_nm <= 0:
+        return ind
+
+    # Indices corresponding to thickness floats: RQWt, RQBt, MQWt, LQWt, LQBt
+    float_indices = [1, 2, 3, 5, 6]
+    for idx in float_indices:
+        try:
+            val = float(ind[idx])
+        except Exception:
+            continue
+        ind[idx] = round(val / step_nm) * step_nm
+
+    return ind
+
+
+class QuantizedRandomSampling(FloatRandomSampling):
+    """Random sampling wrapper that quantizes individuals to the given step."""
+    def __init__(self, step_nm: float = 0.1):
+        super().__init__()
+        self.step_nm = step_nm
+
+    def _do(self, problem, n_samples, **kwargs):
+        X = super()._do(problem, n_samples, **kwargs)
+        for i in range(len(X)):
+            X[i] = _quantize_individual(X[i], step_nm=self.step_nm)
+        return X
 
 
 class QBMDOptimizationProblem(Problem):
@@ -165,6 +210,20 @@ class QBMDOptimizationProblem(Problem):
         
         # Simulation timeout from config
         self.timeout = config["simulator"]["timeout"]
+        # Discretization step (nm) for thickness parameters.
+        # Use the configured simulator step if provided, but enforce a minimum
+        # equal to `optimization.monolayer_thickness` (one atomic layer).
+        sim_step = config.get("simulator", {}).get("discretization_step_nm", None)
+        mono_step = config.get("optimization", {}).get("monolayer_thickness", None)
+        if mono_step is None:
+            # Fallback to a small default if the optimization section omits monolayer_thickness
+            mono_step = 0.3
+            print(
+                f"monolayer_thickness {mono_step} nm; using as minimum step."
+            )
+
+        # Final discretization step used for quantization (nm)
+        self.discretization_step_nm = mono_step
         
         # Definir limites das variáveis
         xl = np.array(bounds['lower'])
@@ -217,16 +276,19 @@ class QBMDOptimizationProblem(Problem):
             # Executar simulação usando run_qbmd
             self.simulation_counter += 1
             
+            # Final sanitize / quantize the individual before running the sim
+            q_ind = _quantize_individual(individual, step_nm=self.discretization_step_nm)
+
             try:
                 # Call run_qbmd with return_results=True to get SimulationResult
                 out_dir, result = run_qbmd(
-                    RW=int(individual[0]),
-                    RQWt=individual[1],
-                    RQBt=individual[2],
-                    MQWt=individual[3],
-                    LW=int(individual[4]),
-                    LQWt=individual[5],
-                    LQBt=individual[6],
+                    RW=int(q_ind[0]),
+                    RQWt=q_ind[1],
+                    RQBt=q_ind[2],
+                    MQWt=q_ind[3],
+                    LW=int(q_ind[4]),
+                    LQWt=q_ind[5],
+                    LQBt=q_ind[6],
                     thickness_units="nm",
                     create_param_folder=True,
                     out_root=str(self.out_root),
@@ -343,11 +405,11 @@ def run_optimization(config_path=None, repo_root=None, initial_population_csv=No
     if initial_population_csv is not None:
         # Load initial population from CSV for warm start
         initial_pop = load_initial_population(initial_population_csv)
-        sampling = InitialPopulationSampling(initial_pop, bounds)
+        sampling = InitialPopulationSampling(initial_pop, bounds, step_nm=problem.discretization_step_nm)
         warm_start = True
     else:
         # Random sampling
-        sampling = FloatRandomSampling()
+        sampling = QuantizedRandomSampling(step_nm=problem.discretization_step_nm)
         warm_start = False
     
     # Configurar NSGA-II
@@ -370,7 +432,7 @@ def run_optimization(config_path=None, repo_root=None, initial_population_csv=No
     print(f"Gerações: {config['optimization']['num_generations']}")
     print(f"Total de simulações: {config['optimization']['population_size'] * config['optimization']['num_generations']}")
     if warm_start:
-        print(f"*População Base: Inicializando com população custumizada")
+        print(f"*População Base: Inicializando com população customizada")
     if save_frequency > 0:
         print(f"Salvando resultados a cada: {save_frequency} simulações")
         print(f"Diretório: nanocomp/simulation_results/")
